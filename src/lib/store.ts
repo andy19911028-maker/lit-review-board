@@ -10,6 +10,7 @@ interface AppState {
   keywords: Keyword[]
   selectedPaperIds: string[]
   activeRelationshipId: string | null
+  nodePositions: Record<string, { x: number; y: number }>
 
   // Papers
   addPaper: (paper: Paper) => void
@@ -38,6 +39,8 @@ interface AppState {
   setSelectedPapers: (ids: string[]) => void
   toggleSelectedPaper: (id: string) => void
   setActiveRelationship: (id: string | null) => void
+  setNodePosition: (id: string, pos: { x: number; y: number }) => void
+  setNodePositions: (positions: Record<string, { x: number; y: number }>) => void
 }
 
 export const useStore = create<AppState>()(
@@ -50,6 +53,7 @@ export const useStore = create<AppState>()(
       keywords: [],
       selectedPaperIds: [],
       activeRelationshipId: null,
+      nodePositions: {},
 
       addPaper: (paper) => set((s) => ({ papers: [...s.papers, paper] })),
       updatePaper: (id, data) =>
@@ -123,6 +127,10 @@ export const useStore = create<AppState>()(
             : [...s.selectedPaperIds, id],
         })),
       setActiveRelationship: (id) => set({ activeRelationshipId: id }),
+      setNodePosition: (id, pos) =>
+        set((s) => ({ nodePositions: { ...s.nodePositions, [id]: pos } })),
+      setNodePositions: (positions) =>
+        set((s) => ({ nodePositions: { ...s.nodePositions, ...positions } })),
     }),
     { name: 'lit-review-store' }
   )

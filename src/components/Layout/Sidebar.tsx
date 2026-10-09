@@ -11,7 +11,7 @@ const links = [
 
 export default function Sidebar() {
   return (
-    <aside className="w-56 bg-gray-900 text-gray-200 flex flex-col py-6 gap-1 shrink-0">
+    <aside className="flex-1 bg-gray-900 text-gray-200 flex flex-col py-6 gap-1">
       <div className="px-5 mb-6">
         <h1 className="text-lg font-bold text-white leading-tight">文獻研究</h1>
         <p className="text-xs text-gray-500 mt-0.5">Literature Review Board</p>

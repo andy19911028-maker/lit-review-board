@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo } from 'react'
+import { useCallback, useState, useRef } from 'react'
 import {
   ReactFlow,
   Background,
@@ -10,15 +10,21 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type NodeChange,
   Handle,
   Position,
   MarkerType,
+  getNodesBounds,
+  getViewportForBounds,
+  useReactFlow,
+  ReactFlowProvider,
 } from '@xyflow/react'
+import { toPng } from 'html-to-image'
 import '@xyflow/react/dist/style.css'
 import { useStore } from '../lib/store'
 import { nanoid, DIRECTION_COLORS, DIRECTION_LABELS, VARIABLE_TYPE_COLORS, VARIABLE_TYPE_LABELS } from '../lib/utils'
 import type { Variable, Relationship } from '../types'
-import { Plus, X, ChevronRight, BookOpen } from 'lucide-react'
+import { Plus, X, ChevronRight, BookOpen, Download, Trash2 } from 'lucide-react'
 
 // ── Custom Variable Node ────────────────────────────────────────────────────
 function VariableNode({ data }: { data: { variable: Variable; onSelect: (v: Variable) => void } }) {
@@ -44,29 +50,32 @@ function VariableNode({ data }: { data: { variable: Variable; onSelect: (v: Vari
 
 const nodeTypes = { variable: VariableNode }
 
-// ── Main ────────────────────────────────────────────────────────────────────
-export default function ModelBoard() {
+// ── Inner board (needs ReactFlow context) ──────────────────────────────────
+function BoardInner() {
   const {
     papers, variables, relationships, selectedPaperIds,
-    addVariable, addRelationship,
+    addVariable, addRelationship, deleteRelationship, deleteVariable,
     setActiveRelationship, activeRelationshipId,
+    nodePositions, setNodePositions,
     syncKeywords,
   } = useStore()
 
-  // Filter by selected papers (or show all if none selected)
+  const { getNodes } = useReactFlow()
+  const flowRef = useRef<HTMLDivElement>(null)
+
   const activePaperIds = selectedPaperIds.length > 0 ? selectedPaperIds : papers.map((p) => p.id)
   const activeVars = variables.filter((v) => v.paper_ids.some((pid) => activePaperIds.includes(pid)))
   const activeRels = relationships.filter((r) => activePaperIds.includes(r.paper_id))
 
-  const initNodes: Node[] = useMemo(() =>
+  const buildNodes = (): Node[] =>
     activeVars.map((v, i) => ({
       id: v.id,
       type: 'variable',
-      position: { x: 80 + (i % 4) * 180, y: 80 + Math.floor(i / 4) * 140 },
+      position: nodePositions[v.id] ?? { x: 80 + (i % 4) * 200, y: 80 + Math.floor(i / 4) * 150 },
       data: { variable: v, onSelect: () => {} },
-    })), [activeVars.length])
+    }))
 
-  const initEdges: Edge[] = useMemo(() =>
+  const buildEdges = (): Edge[] =>
     activeRels.map((r) => ({
       id: r.id,
       source: r.from_variable_id,
@@ -76,16 +85,17 @@ export default function ModelBoard() {
       markerEnd: { type: MarkerType.ArrowClosed, color: DIRECTION_COLORS[r.direction] },
       labelStyle: { fontSize: 10, fill: DIRECTION_COLORS[r.direction], fontWeight: 600 },
       labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
-    })), [activeRels.length])
+    }))
 
-  const [nodes, , onNodesChange] = useNodesState(initNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initEdges)
+  const [nodes, setNodes, onNodesChange] = useNodesState(buildNodes())
+  const [edges, setEdges, onEdgesChange] = useEdgesState(buildEdges())
 
   const [showAddVar, setShowAddVar] = useState(false)
   const [showAddRel, setShowAddRel] = useState(false)
   const [selectedVar, setSelectedVar] = useState<Variable | null>(null)
+  const [kwInput, setKwInput] = useState('')
 
-  const [varForm, setVarForm] = useState({ name: '', type: 'independent' as Variable['type'], description: '', paper_id: '' })
+  const [varForm, setVarForm] = useState({ name: '', type: 'independent' as Variable['type'], description: '', paper_id: '', keywords: [] as string[] })
   const [relForm, setRelForm] = useState({
     from_variable_id: '', to_variable_id: '', direction: 'positive' as Relationship['direction'],
     explanation: '', original_text: '', paper_id: '', hypothesis_ids: [] as string[],
@@ -95,6 +105,16 @@ export default function ModelBoard() {
     ...n,
     data: { ...n.data, onSelect: (v: Variable) => setSelectedVar(v) },
   }))
+
+  // Save node positions when drag ends
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    onNodesChange(changes)
+    const posUpdates: Record<string, { x: number; y: number }> = {}
+    changes.forEach((c) => {
+      if (c.type === 'position' && c.position) posUpdates[c.id] = c.position
+    })
+    if (Object.keys(posUpdates).length > 0) setNodePositions(posUpdates)
+  }, [onNodesChange, setNodePositions])
 
   const onConnect = useCallback((conn: Connection) => {
     if (!conn.source || !conn.target) return
@@ -106,55 +126,107 @@ export default function ModelBoard() {
   const handleAddVar = (e: React.FormEvent) => {
     e.preventDefault()
     if (!varForm.name.trim() || !varForm.paper_id) return
-    addVariable({ id: nanoid(), ...varForm, paper_ids: [varForm.paper_id], keywords: [] })
+    const newVar: Variable = { id: nanoid(), ...varForm, paper_ids: [varForm.paper_id] }
+    addVariable(newVar)
+    setNodes((ns) => [...ns, {
+      id: newVar.id, type: 'variable',
+      position: { x: 100 + Math.random() * 300, y: 100 + Math.random() * 200 },
+      data: { variable: newVar, onSelect: () => {} },
+    }])
     syncKeywords()
     setShowAddVar(false)
-    setVarForm({ name: '', type: 'independent', description: '', paper_id: '' })
+    setVarForm({ name: '', type: 'independent', description: '', paper_id: '', keywords: [] })
+    setKwInput('')
   }
 
   const handleAddRel = (e: React.FormEvent) => {
     e.preventDefault()
     if (!relForm.from_variable_id || !relForm.to_variable_id || !relForm.paper_id) return
-    addRelationship({ id: nanoid(), ...relForm })
+    const newRel: Relationship = { id: nanoid(), ...relForm }
+    addRelationship(newRel)
+    setEdges((es) => es.map((edge) =>
+      edge.source === relForm.from_variable_id && edge.target === relForm.to_variable_id
+        ? {
+            ...edge,
+            id: newRel.id,
+            label: DIRECTION_LABELS[relForm.direction],
+            style: { stroke: DIRECTION_COLORS[relForm.direction], strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: DIRECTION_COLORS[relForm.direction] },
+            labelStyle: { fontSize: 10, fill: DIRECTION_COLORS[relForm.direction], fontWeight: 600 },
+            labelBgStyle: { fill: 'white', fillOpacity: 0.9 },
+          }
+        : edge
+    ))
     setShowAddRel(false)
+    setRelForm({ from_variable_id: '', to_variable_id: '', direction: 'positive', explanation: '', original_text: '', paper_id: '', hypothesis_ids: [] })
   }
 
-  const activeRel = activeRelationshipId
-    ? relationships.find((r) => r.id === activeRelationshipId)
-    : null
+  const handleDeleteVar = (v: Variable) => {
+    deleteVariable(v.id)
+    setNodes((ns) => ns.filter((n) => n.id !== v.id))
+    setSelectedVar(null)
+  }
+
+  const handleDeleteRel = (relId: string) => {
+    deleteRelationship(relId)
+    setEdges((es) => es.filter((e) => e.id !== relId))
+    setActiveRelationship(null)
+  }
+
+  // Export as PNG
+  const handleExport = async () => {
+    const nodesBounds = getNodesBounds(getNodes())
+    const viewport = getViewportForBounds(nodesBounds, 1600, 900, 0.5, 2, 0.1)
+    const el = document.querySelector('.react-flow__viewport') as HTMLElement
+    if (!el) return
+    const dataUrl = await toPng(el, {
+      backgroundColor: '#f8fafc',
+      width: 1600,
+      height: 900,
+      style: { width: '1600px', height: '900px', transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})` },
+    })
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = 'model-board.png'
+    a.click()
+  }
+
+  // Variable keyword editor
+  const addVarKw = (kw: string) => {
+    if (!kw.trim() || varForm.keywords.includes(kw.trim())) return
+    setVarForm((f) => ({ ...f, keywords: [...f.keywords, kw.trim()] }))
+    setKwInput('')
+  }
+
+  const activeRel = activeRelationshipId ? relationships.find((r) => r.id === activeRelationshipId) : null
   const activeRelPaper = activeRel ? papers.find((p) => p.id === activeRel.paper_id) : null
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full w-full">
       {/* Toolbar */}
       <div className="w-56 bg-white border-r border-gray-100 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
-        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">工具</div>
-        <button
-          onClick={() => setShowAddVar(true)}
-          className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100"
-        >
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</div>
+        <button onClick={() => setShowAddVar(true)}
+          className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100">
           <Plus size={14} /> 新增變數
         </button>
-        <button
-          onClick={() => setShowAddRel(true)}
-          className="flex items-center gap-2 px-3 py-2 bg-violet-50 text-violet-700 rounded-lg text-sm hover:bg-violet-100"
-        >
+        <button onClick={() => setShowAddRel(true)}
+          className="flex items-center gap-2 px-3 py-2 bg-violet-50 text-violet-700 rounded-lg text-sm hover:bg-violet-100">
           <Plus size={14} /> 新增關係
+        </button>
+        <button onClick={handleExport}
+          className="flex items-center gap-2 px-3 py-2 bg-gray-50 text-gray-700 rounded-lg text-sm hover:bg-gray-100">
+          <Download size={14} /> 匯出 PNG
         </button>
 
         <div className="border-t pt-3 mt-1">
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">顯示文獻</div>
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">文獻篩選</div>
           {papers.length === 0 ? (
             <p className="text-xs text-gray-400">先至文獻庫新增</p>
           ) : (
             papers.map((p) => (
               <label key={p.id} className="flex items-start gap-2 mb-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={activePaperIds.includes(p.id)}
-                  readOnly
-                  className="mt-0.5 accent-blue-600"
-                />
+                <input type="checkbox" checked={activePaperIds.includes(p.id)} readOnly className="mt-0.5 accent-blue-600" />
                 <span className="text-xs text-gray-600 line-clamp-2">{p.title} ({p.year})</span>
               </label>
             ))
@@ -181,14 +253,15 @@ export default function ModelBoard() {
       </div>
 
       {/* Flow Canvas */}
-      <div className="flex-1 relative">
+      <div ref={flowRef} className="flex-1 relative">
         <ReactFlow
           nodes={nodesWithHandler}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onEdgeClick={(_, edge) => setActiveRelationship(edge.id)}
+          onEdgeClick={(_, edge) => { setActiveRelationship(edge.id); setSelectedVar(null) }}
+          onPaneClick={() => { setActiveRelationship(null); setSelectedVar(null) }}
           nodeTypes={nodeTypes}
           fitView
         >
@@ -201,26 +274,38 @@ export default function ModelBoard() {
       {/* Right Detail Panel */}
       {(selectedVar || activeRel) && (
         <div className="w-72 bg-white border-l border-gray-100 p-5 overflow-y-auto shrink-0">
-          <button
-            onClick={() => { setSelectedVar(null); setActiveRelationship(null) }}
-            className="mb-4 p-1 text-gray-400 hover:text-gray-600"
-          >
+          <button onClick={() => { setSelectedVar(null); setActiveRelationship(null) }}
+            className="mb-4 p-1 text-gray-400 hover:text-gray-600">
             <X size={16} />
           </button>
 
           {selectedVar && (
             <div>
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">變數</div>
-              <h3 className="text-lg font-bold text-gray-800 mb-1">{selectedVar.name}</h3>
-              <span
-                className="text-xs px-2 py-0.5 rounded-full font-medium"
-                style={{ background: VARIABLE_TYPE_COLORS[selectedVar.type] + '22', color: VARIABLE_TYPE_COLORS[selectedVar.type] }}
-              >
+              <div className="flex items-start justify-between">
+                <h3 className="text-lg font-bold text-gray-800 mb-1">{selectedVar.name}</h3>
+                <button onClick={() => handleDeleteVar(selectedVar)} className="p-1 text-gray-300 hover:text-red-500">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                style={{ background: VARIABLE_TYPE_COLORS[selectedVar.type] + '22', color: VARIABLE_TYPE_COLORS[selectedVar.type] }}>
                 {VARIABLE_TYPE_LABELS[selectedVar.type]}
               </span>
-              {selectedVar.description && (
-                <p className="text-sm text-gray-600 mt-3">{selectedVar.description}</p>
+              {selectedVar.description && <p className="text-sm text-gray-600 mt-3">{selectedVar.description}</p>}
+
+              {/* Keywords */}
+              {selectedVar.keywords.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-xs text-gray-400 mb-1">關鍵詞</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedVar.keywords.map((kw) => (
+                      <span key={kw} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">{kw}</span>
+                    ))}
+                  </div>
+                </div>
               )}
+
               <div className="mt-3">
                 <div className="text-xs text-gray-400 mb-1">出現於</div>
                 {selectedVar.paper_ids.map((pid) => {
@@ -228,19 +313,18 @@ export default function ModelBoard() {
                   return p ? <div key={pid} className="text-xs text-gray-600 flex items-center gap-1"><BookOpen size={10} />{p.title} ({p.year})</div> : null
                 })}
               </div>
+
               <div className="mt-4">
                 <div className="text-xs text-gray-400 mb-1">相關關係</div>
                 {relationships
                   .filter((r) => r.from_variable_id === selectedVar.id || r.to_variable_id === selectedVar.id)
                   .map((r) => {
                     const other = variables.find((v) => v.id === (r.from_variable_id === selectedVar.id ? r.to_variable_id : r.from_variable_id))
+                    const isSource = r.from_variable_id === selectedVar.id
                     return (
-                      <div
-                        key={r.id}
-                        className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-blue-600 mb-1"
-                        onClick={() => { setActiveRelationship(r.id); setSelectedVar(null) }}
-                      >
-                        <ChevronRight size={10} style={{ color: DIRECTION_COLORS[r.direction] }} />
+                      <div key={r.id} className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-blue-600 mb-1"
+                        onClick={() => { setActiveRelationship(r.id); setSelectedVar(null) }}>
+                        <span className="text-gray-400">{isSource ? '→' : '←'}</span>
                         {other?.name}
                         <span style={{ color: DIRECTION_COLORS[r.direction] }}>({DIRECTION_LABELS[r.direction]})</span>
                       </div>
@@ -253,36 +337,41 @@ export default function ModelBoard() {
           {activeRel && (
             <div>
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">關係</div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="font-medium text-sm text-gray-700">
-                  {variables.find((v) => v.id === activeRel.from_variable_id)?.name}
-                </span>
-                <span
-                  className="text-xs font-bold px-2 py-0.5 rounded-full"
-                  style={{ background: DIRECTION_COLORS[activeRel.direction] + '22', color: DIRECTION_COLORS[activeRel.direction] }}
-                >
-                  {DIRECTION_LABELS[activeRel.direction]}
-                </span>
-                <span className="font-medium text-sm text-gray-700">
-                  {variables.find((v) => v.id === activeRel.to_variable_id)?.name}
-                </span>
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-sm text-gray-700">
+                    {variables.find((v) => v.id === activeRel.from_variable_id)?.name}
+                  </span>
+                  <ChevronRight size={12} style={{ color: DIRECTION_COLORS[activeRel.direction] }} />
+                  <span className="font-medium text-sm text-gray-700">
+                    {variables.find((v) => v.id === activeRel.to_variable_id)?.name}
+                  </span>
+                </div>
+                <button onClick={() => handleDeleteRel(activeRel.id)} className="p-1 text-gray-300 hover:text-red-500 shrink-0">
+                  <Trash2 size={14} />
+                </button>
               </div>
 
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{ background: DIRECTION_COLORS[activeRel.direction] + '22', color: DIRECTION_COLORS[activeRel.direction] }}>
+                {DIRECTION_LABELS[activeRel.direction]}
+              </span>
+
               {activeRelPaper && (
-                <div className="text-xs text-gray-400 flex items-center gap-1 mb-3">
+                <div className="text-xs text-gray-400 flex items-center gap-1 mt-3">
                   <BookOpen size={10} /> {activeRelPaper.title} ({activeRelPaper.year})
                 </div>
               )}
 
               {activeRel.explanation && (
-                <div className="mb-3">
+                <div className="mt-3">
                   <div className="text-xs font-semibold text-gray-500 mb-1">解釋</div>
                   <p className="text-sm text-gray-700 leading-relaxed">{activeRel.explanation}</p>
                 </div>
               )}
 
               {activeRel.original_text && (
-                <div className="bg-amber-50 border-l-4 border-amber-400 p-3 rounded-r-lg">
+                <div className="bg-amber-50 border-l-4 border-amber-400 p-3 rounded-r-lg mt-3">
                   <div className="text-xs font-semibold text-amber-700 mb-1">原文引用</div>
                   <p className="text-xs text-amber-800 leading-relaxed italic">"{activeRel.original_text}"</p>
                 </div>
@@ -306,6 +395,22 @@ export default function ModelBoard() {
             </Field>
             <Field label="說明">
               <textarea rows={2} value={varForm.description} onChange={(e) => setVarForm((f) => ({ ...f, description: e.target.value }))} className={INPUT + ' resize-none'} />
+            </Field>
+            <Field label="關鍵詞">
+              <div className="flex gap-2 mb-1">
+                <input value={kwInput} onChange={(e) => setKwInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVarKw(kwInput) } }}
+                  placeholder="輸入後 Enter" className={INPUT} />
+                <button type="button" onClick={() => addVarKw(kwInput)} className="px-3 py-2 bg-gray-100 rounded-lg text-sm">+</button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {varForm.keywords.map((kw) => (
+                  <span key={kw} className="flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
+                    {kw}
+                    <button type="button" onClick={() => setVarForm((f) => ({ ...f, keywords: f.keywords.filter((k) => k !== kw) }))}><X size={10} /></button>
+                  </span>
+                ))}
+              </div>
             </Field>
             <Field label="所屬文獻 *">
               <select required value={varForm.paper_id} onChange={(e) => setVarForm((f) => ({ ...f, paper_id: e.target.value }))} className={INPUT}>
@@ -339,11 +444,11 @@ export default function ModelBoard() {
                 {Object.entries(DIRECTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </Field>
-            <Field label="解釋">
-              <textarea rows={2} value={relForm.explanation} onChange={(e) => setRelForm((f) => ({ ...f, explanation: e.target.value }))} className={INPUT + ' resize-none'} placeholder="為什麼是正/負相關？" />
+            <Field label="解釋（為什麼是正/負相關）">
+              <textarea rows={2} value={relForm.explanation} onChange={(e) => setRelForm((f) => ({ ...f, explanation: e.target.value }))} className={INPUT + ' resize-none'} />
             </Field>
-            <Field label="原文引用">
-              <textarea rows={3} value={relForm.original_text} onChange={(e) => setRelForm((f) => ({ ...f, original_text: e.target.value }))} className={INPUT + ' resize-none'} placeholder="貼上文獻原文..." />
+            <Field label="原文引用（貼上文獻原文）">
+              <textarea rows={3} value={relForm.original_text} onChange={(e) => setRelForm((f) => ({ ...f, original_text: e.target.value }))} className={INPUT + ' resize-none'} placeholder="&quot;...&quot;" />
             </Field>
             <Field label="所屬文獻 *">
               <select required value={relForm.paper_id} onChange={(e) => setRelForm((f) => ({ ...f, paper_id: e.target.value }))} className={INPUT}>
@@ -356,6 +461,15 @@ export default function ModelBoard() {
         </Modal>
       )}
     </div>
+  )
+}
+
+// ── Public export wrapped in provider ──────────────────────────────────────
+export default function ModelBoard() {
+  return (
+    <ReactFlowProvider>
+      <BoardInner />
+    </ReactFlowProvider>
   )
 }
 
