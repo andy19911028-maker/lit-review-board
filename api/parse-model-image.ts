@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!imageBase64) return res.status(400).json({ error: 'Missing imageBase64' })
 
   try {
-    const data = await completeJson<AnalysisResult>({
+    const { data, usage } = await completeJson<AnalysisResult>({
       model: visionModel(),
       maxTokens: 4096,
       messages: [{
@@ -62,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }],
     })
 
-    res.json(data)
+    res.json({ ...data, _usage: usage })
   } catch (e) {
     sendAiError(res, e)
   }

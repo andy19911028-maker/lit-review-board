@@ -1,8 +1,8 @@
 import { useStore } from '../lib/store'
-import { BookOpen, GitBranch, Tag, ListChecks } from 'lucide-react'
+import { BookOpen, GitBranch, Tag, ListChecks, Zap } from 'lucide-react'
 
 export default function Dashboard() {
-  const { papers, variables, relationships, hypotheses, keywords } = useStore()
+  const { papers, variables, relationships, hypotheses, keywords, tokenUsage } = useStore()
 
   const stats = [
     { label: '文獻', value: papers.length, icon: BookOpen, color: 'bg-blue-500' },
@@ -32,6 +32,35 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Token Usage */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="bg-orange-500 text-white p-2 rounded-lg"><Zap size={16} /></div>
+          <h3 className="font-semibold text-gray-700">AI Token 用量（本機累計）</h3>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="text-center">
+            <div className="text-xl font-bold text-gray-800">{tokenUsage.calls}</div>
+            <div className="text-xs text-gray-500 mt-0.5">呼叫次數</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-bold text-blue-600">{tokenUsage.promptTokens.toLocaleString()}</div>
+            <div className="text-xs text-gray-500 mt-0.5">輸入 tokens</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-bold text-violet-600">{tokenUsage.completionTokens.toLocaleString()}</div>
+            <div className="text-xs text-gray-500 mt-0.5">輸出 tokens</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-bold text-emerald-600">{tokenUsage.totalTokens.toLocaleString()}</div>
+            <div className="text-xs text-gray-500 mt-0.5">合計 tokens</div>
+          </div>
+        </div>
+        {tokenUsage.calls === 0 && (
+          <p className="text-gray-400 text-xs text-center mt-3">上傳 PDF 或使用 AI 功能後會在此顯示用量</p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

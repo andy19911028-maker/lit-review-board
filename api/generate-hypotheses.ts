@@ -15,7 +15,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!title) return res.status(400).json({ error: 'Missing title' })
 
   try {
-    const data = await completeJson<HypothesesResult>({
+    const { data, usage } = await completeJson<HypothesesResult>({
       model: textModel(),
       maxTokens: 4096,
       messages: [{
@@ -47,7 +47,7 @@ ${abstract ?? '（無摘要）'}
       }],
     })
 
-    res.json(data)
+    res.json({ ...data, _usage: usage })
   } catch (e) {
     sendAiError(res, e)
   }

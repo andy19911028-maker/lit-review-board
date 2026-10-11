@@ -36,11 +36,17 @@ export function visionModel(): string {
   return process.env.AI_MODEL_VISION ?? DEFAULT_VISION_MODEL
 }
 
+export type TokenUsage = {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
 export async function completeJson<T>(params: {
   model: string
   messages: ChatMessage[]
   maxTokens?: number
-}): Promise<T> {
+}): Promise<{ data: T; usage: TokenUsage }> {
   let completion: OpenAI.Chat.Completions.ChatCompletion
   try {
     completion = await client().chat.completions.create({
@@ -57,8 +63,13 @@ export async function completeJson<T>(params: {
   }
 
   const text = completion.choices[0]?.message?.content ?? ''
+  const usage: TokenUsage = {
+    prompt_tokens: completion.usage?.prompt_tokens ?? 0,
+    completion_tokens: completion.usage?.completion_tokens ?? 0,
+    total_tokens: completion.usage?.total_tokens ?? 0,
+  }
   try {
-    return JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim()) as T
+    return { data: JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim()) as T, usage }
   } catch {
     throw new AiError(500, 'AI 回覆非合法 JSON', text)
   }

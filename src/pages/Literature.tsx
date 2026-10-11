@@ -15,7 +15,7 @@ const EMPTY_FORM: Omit<Paper, 'id' | 'created_at'> = {
 }
 
 export default function Literature() {
-  const { papers, addPaper, deletePaper, selectedPaperIds, toggleSelectedPaper, syncKeywords } = useStore()
+  const { papers, addPaper, deletePaper, selectedPaperIds, toggleSelectedPaper, syncKeywords, addTokenUsage } = useStore()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [kwInput, setKwInput] = useState('')
@@ -45,6 +45,7 @@ export default function Literature() {
         throw new Error(errBody?.error ?? `解析失敗（${res.status}）`)
       }
       const data = await res.json()
+      if (data._usage) addTokenUsage(data._usage)
       setForm({
         title: data.title ?? '',
         authors: data.authors ?? '',

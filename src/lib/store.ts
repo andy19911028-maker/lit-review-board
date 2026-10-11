@@ -35,6 +35,10 @@ interface AppState {
   // Keywords
   syncKeywords: () => void
 
+  // Token usage
+  tokenUsage: { promptTokens: number; completionTokens: number; totalTokens: number; calls: number }
+  addTokenUsage: (u: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void
+
   // UI
   setSelectedPapers: (ids: string[]) => void
   toggleSelectedPaper: (id: string) => void
@@ -54,6 +58,7 @@ export const useStore = create<AppState>()(
       selectedPaperIds: [],
       activeRelationshipId: null,
       nodePositions: {},
+      tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 },
 
       addPaper: (paper) => set((s) => ({ papers: [...s.papers, paper] })),
       updatePaper: (id, data) =>
@@ -118,6 +123,16 @@ export const useStore = create<AppState>()(
 
         set({ keywords: Array.from(kwMap.values()) })
       },
+
+      addTokenUsage: (u) =>
+        set((s) => ({
+          tokenUsage: {
+            promptTokens: s.tokenUsage.promptTokens + u.prompt_tokens,
+            completionTokens: s.tokenUsage.completionTokens + u.completion_tokens,
+            totalTokens: s.tokenUsage.totalTokens + u.total_tokens,
+            calls: s.tokenUsage.calls + 1,
+          },
+        })),
 
       setSelectedPapers: (ids) => set({ selectedPaperIds: ids }),
       toggleSelectedPaper: (id) =>

@@ -14,7 +14,7 @@ const EMPTY: Omit<Hypothesis, 'id'> = {
 }
 
 export default function Hypotheses() {
-  const { papers, variables, hypotheses, addHypothesis, updateHypothesis, deleteHypothesis } = useStore()
+  const { papers, variables, hypotheses, addHypothesis, updateHypothesis, deleteHypothesis, addTokenUsage } = useStore()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [filterPaper, setFilterPaper] = useState('')
@@ -35,7 +35,8 @@ export default function Hypotheses() {
           body: JSON.stringify({ title: paper.title, abstract: paper.abstract ?? '' }),
         })
         if (!res.ok) throw new Error(await res.text())
-        const data = await res.json() as { hypotheses: { number: string; type: string; content: string }[] }
+        const data = await res.json() as { hypotheses: { number: string; type: string; content: string }[]; _usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }
+        if (data._usage) addTokenUsage(data._usage)
         for (const h of (data.hypotheses ?? [])) {
           const dup = hypotheses.find((eh) => eh.paper_id === paper.id && eh.number === h.number)
           if (dup) continue

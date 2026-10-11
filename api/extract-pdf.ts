@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 書目資訊都在前幾頁，只取前三頁以控制 token 用量
     const paperText = await extractPdfText(pdfBase64, 3)
 
-    const data = await completeJson<PaperInfo>({
+    const { data, usage } = await completeJson<PaperInfo>({
       model: textModel(),
       maxTokens: 2048,
       messages: [{
@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }],
     })
 
-    res.json(data)
+    res.json({ ...data, _usage: usage })
   } catch (e) {
     sendAiError(res, e)
   }

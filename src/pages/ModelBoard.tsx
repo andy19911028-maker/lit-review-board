@@ -57,7 +57,7 @@ function BoardInner() {
     addVariable, addRelationship, deleteRelationship, deleteVariable,
     setActiveRelationship, activeRelationshipId,
     nodePositions, setNodePositions,
-    syncKeywords,
+    syncKeywords, addTokenUsage,
   } = useStore()
 
   const { getNodes } = useReactFlow()
@@ -123,7 +123,8 @@ function BoardInner() {
           body: JSON.stringify({ title: paper.title, abstract: paper.abstract ?? '' }),
         })
         if (!res.ok) throw new Error(await res.text())
-        const data = await res.json() as { variables: { name: string; type: string; description: string }[]; relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[] }
+        const data = await res.json() as { variables: { name: string; type: string; description: string }[]; relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[]; _usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }
+        if (data._usage) addTokenUsage(data._usage)
         const nameToId: Record<string, string> = {}
         for (const v of (data.variables ?? [])) {
           const existing = variables.find((ev) => ev.name.toLowerCase() === v.name.toLowerCase())
@@ -182,7 +183,8 @@ function BoardInner() {
         body: JSON.stringify({ imageBase64: pendingImageB64, mediaType: pendingImageType }),
       })
       if (!res.ok) throw new Error(await res.text())
-      const data = await res.json() as { variables: { name: string; type: string; description: string }[]; relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[] }
+      const data = await res.json() as { variables: { name: string; type: string; description: string }[]; relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[]; _usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }
+      if (data._usage) addTokenUsage(data._usage)
       const nameToId: Record<string, string> = {}
       let addedCount = 0
       for (const v of (data.variables ?? [])) {
