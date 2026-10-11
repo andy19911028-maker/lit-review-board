@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { BookOpen, GitBranch, Network, ListChecks, LayoutDashboard } from 'lucide-react'
+import { BookOpen, GitBranch, Network, ListChecks, LayoutDashboard, Layers } from 'lucide-react'
 
 const links = [
   { to: '/', icon: LayoutDashboard, label: '總覽' },
   { to: '/literature', icon: BookOpen, label: '文獻庫' },
   { to: '/model', icon: GitBranch, label: '模型白板' },
+  { to: '/meta-model', icon: Layers, label: '整合模型' },
   { to: '/hypotheses', icon: ListChecks, label: '假設命題' },
   { to: '/network', icon: Network, label: '關鍵詞網絡' },
 ]

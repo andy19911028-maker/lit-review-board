@@ -5,6 +5,7 @@ import Literature from './pages/Literature'
 import ModelBoard from './pages/ModelBoard'
 import Hypotheses from './pages/Hypotheses'
 import KeywordNetwork from './pages/KeywordNetwork'
+import MetaModel from './pages/MetaModel'
 import { useSupabaseSync, migrateLocalToCloud } from './lib/useSync'
 import { isSupabaseEnabled } from './lib/supabase'
 import { useStore } from './lib/store'
@@ -100,6 +101,7 @@ function AppInner() {
             <Route path="/model" element={<div className="flex flex-1 h-screen"><ModelBoard /></div>} />
             <Route path="/hypotheses" element={<Hypotheses />} />
             <Route path="/network" element={<div className="flex-1" style={{ height: '100vh' }}><KeywordNetwork /></div>} />
+            <Route path="/meta-model" element={<div className="flex flex-1 h-screen"><MetaModel /></div>} />
           </Routes>
         </main>
       </div>
