@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { completeJson, sendAiError, visionModel } from '../lib/ai'
+import { completeJson, sendAiError, visionModel } from '../lib/ai.js'
 
 export const config = { api: { bodyParser: { sizeLimit: '10mb' } } }
 export const maxDuration = 60

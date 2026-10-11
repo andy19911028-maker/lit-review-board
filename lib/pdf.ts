@@ -1,5 +1,5 @@
 import { PDFParse } from 'pdf-parse'
-import { AiError } from './ai'
+import { AiError } from './ai.js'
 
 const MIN_TEXT_CHARS = 200
 

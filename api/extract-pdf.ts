@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { completeJson, sendAiError, textModel } from '../lib/ai'
-import { extractPdfText } from '../lib/pdf'
+import { completeJson, sendAiError, textModel } from '../lib/ai.js'
+import { extractPdfText } from '../lib/pdf.js'
 
 export const config = { api: { bodyParser: { sizeLimit: '20mb' } } }
 export const maxDuration = 60

@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "noEmit": false,
+    "declaration": false,
+    "outDir": ".",
+    "strict": true
+  },
+  "include": ["api", "lib"],
+  "exclude": ["node_modules", "dist", "src"]
+}
