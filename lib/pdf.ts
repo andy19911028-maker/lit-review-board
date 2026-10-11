@@ -1,3 +1,4 @@
+import './polyfills.js'
 import { PDFParse } from 'pdf-parse'
 import { AiError } from './ai.js'
 
