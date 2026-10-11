@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef } from 'react'
+import { useCallback, useState, useRef, useEffect } from 'react'
 import {
   ReactFlow,
   Background,
@@ -24,7 +24,7 @@ import '@xyflow/react/dist/style.css'
 import { useStore } from '../lib/store'
 import { nanoid, DIRECTION_COLORS, DIRECTION_LABELS, VARIABLE_TYPE_COLORS, VARIABLE_TYPE_LABELS } from '../lib/utils'
 import type { Variable, Relationship } from '../types'
-import { Plus, X, ChevronRight, BookOpen, Download, Trash2 } from 'lucide-react'
+import { Plus, X, ChevronRight, BookOpen, Download, Trash2, Sparkles, ImagePlus, Loader2 } from 'lucide-react'
 
 // ── Custom Variable Node ────────────────────────────────────────────────────
 function VariableNode({ data }: { data: { variable: Variable; onSelect: (v: Variable) => void } }) {
@@ -100,6 +100,115 @@ function BoardInner() {
     from_variable_id: '', to_variable_id: '', direction: 'positive' as Relationship['direction'],
     explanation: '', original_text: '', paper_id: '', hypothesis_ids: [] as string[],
   })
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiProgress, setAiProgress] = useState('')
+  const [aiError, setAiError] = useState('')
+  const [showImageModal, setShowImageModal] = useState(false)
+  const [imagePaperId, setImagePaperId] = useState('')
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const [pendingImageB64, setPendingImageB64] = useState('')
+  const [pendingImageType, setPendingImageType] = useState('image/png')
+
+  const handleAiAnalyze = async () => {
+    const papersToAnalyze = activePaperIds.map((id) => papers.find((p) => p.id === id)).filter(Boolean) as typeof papers
+    if (!papersToAnalyze.length) { setAiError('請先選擇或新增文獻'); return }
+    setAiLoading(true); setAiError('')
+    let addedCount = 0
+    for (const paper of papersToAnalyze) {
+      setAiProgress(`分析「${paper.title.slice(0, 20)}...」(${papersToAnalyze.indexOf(paper) + 1}/${papersToAnalyze.length})`)
+      try {
+        const res = await fetch('/api/analyze-paper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: paper.title, abstract: paper.abstract ?? '' }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const data = await res.json() as { variables: { name: string; type: string; description: string }[]; relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[] }
+        const nameToId: Record<string, string> = {}
+        for (const v of (data.variables ?? [])) {
+          const existing = variables.find((ev) => ev.name.toLowerCase() === v.name.toLowerCase())
+          if (existing) {
+            nameToId[v.name] = existing.id
+            if (!existing.paper_ids.includes(paper.id)) {
+              existing.paper_ids.push(paper.id)
+            }
+          } else {
+            const newVar: Variable = { id: nanoid(), name: v.name, type: v.type as Variable['type'], description: v.description, paper_ids: [paper.id], keywords: [] }
+            addVariable(newVar)
+            nameToId[v.name] = newVar.id
+            setNodes((ns) => [...ns, { id: newVar.id, type: 'variable', position: { x: 80 + addedCount * 220, y: 80 + Math.floor(addedCount / 4) * 160 }, data: { variable: newVar, onSelect: () => {} } }])
+            addedCount++
+          }
+        }
+        for (const r of (data.relationships ?? [])) {
+          const fromId = nameToId[r.from]
+          const toId = nameToId[r.to]
+          if (!fromId || !toId) continue
+          const dup = relationships.find((er) => er.from_variable_id === fromId && er.to_variable_id === toId && er.paper_id === paper.id)
+          if (dup) continue
+          const newRel: Relationship = { id: nanoid(), from_variable_id: fromId, to_variable_id: toId, direction: r.direction as Relationship['direction'], explanation: r.explanation, original_text: r.original_text, paper_id: paper.id, hypothesis_ids: [] }
+          addRelationship(newRel)
+          setEdges((es) => [...es, { id: newRel.id, source: fromId, target: toId, label: DIRECTION_LABELS[newRel.direction], style: { stroke: DIRECTION_COLORS[newRel.direction], strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: DIRECTION_COLORS[newRel.direction] }, labelStyle: { fontSize: 10, fill: DIRECTION_COLORS[newRel.direction], fontWeight: 600 }, labelBgStyle: { fill: 'white', fillOpacity: 0.9 } }])
+        }
+        syncKeywords()
+      } catch (e) {
+        console.error(e)
+      }
+    }
+    setAiLoading(false); setAiProgress('')
+  }
+
+  const handleImageFile = (file: File) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const b64 = (e.target?.result as string).split(',')[1]
+      setPendingImageB64(b64)
+      setPendingImageType(file.type || 'image/png')
+      setImagePaperId(papers[0]?.id ?? '')
+      setShowImageModal(true)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleParseImage = async () => {
+    if (!pendingImageB64 || !imagePaperId) return
+    setShowImageModal(false)
+    setAiLoading(true); setAiError('')
+    setAiProgress('AI 解析模型圖...')
+    try {
+      const res = await fetch('/api/parse-model-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: pendingImageB64, mediaType: pendingImageType }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json() as { variables: { name: string; type: string; description: string }[]; relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[] }
+      const nameToId: Record<string, string> = {}
+      let addedCount = 0
+      for (const v of (data.variables ?? [])) {
+        const existing = variables.find((ev) => ev.name.toLowerCase() === v.name.toLowerCase())
+        if (existing) { nameToId[v.name] = existing.id } else {
+          const newVar: Variable = { id: nanoid(), name: v.name, type: v.type as Variable['type'], description: v.description, paper_ids: [imagePaperId], keywords: [] }
+          addVariable(newVar)
+          nameToId[v.name] = newVar.id
+          setNodes((ns) => [...ns, { id: newVar.id, type: 'variable', position: { x: 80 + addedCount * 220, y: 80 + Math.floor(addedCount / 4) * 160 }, data: { variable: newVar, onSelect: () => {} } }])
+          addedCount++
+        }
+      }
+      for (const r of (data.relationships ?? [])) {
+        const fromId = nameToId[r.from]; const toId = nameToId[r.to]
+        if (!fromId || !toId) continue
+        const newRel: Relationship = { id: nanoid(), from_variable_id: fromId, to_variable_id: toId, direction: r.direction as Relationship['direction'], explanation: r.explanation ?? '', original_text: r.original_text ?? '', paper_id: imagePaperId, hypothesis_ids: [] }
+        addRelationship(newRel)
+        setEdges((es) => [...es, { id: newRel.id, source: fromId, target: toId, label: DIRECTION_LABELS[newRel.direction], style: { stroke: DIRECTION_COLORS[newRel.direction], strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: DIRECTION_COLORS[newRel.direction] }, labelStyle: { fontSize: 10, fill: DIRECTION_COLORS[newRel.direction], fontWeight: 600 }, labelBgStyle: { fill: 'white', fillOpacity: 0.9 } }])
+      }
+      syncKeywords()
+    } catch (e) { setAiError('圖片解析失敗，請重試'); console.error(e) }
+    finally { setAiLoading(false); setAiProgress(''); setPendingImageB64('') }
+  }
+
+  // suppress unused warning
+  useEffect(() => { void imageInputRef }, [])
 
   const nodesWithHandler: Node[] = nodes.map((n) => ({
     ...n,
@@ -205,7 +314,26 @@ function BoardInner() {
     <div className="flex h-full w-full">
       {/* Toolbar */}
       <div className="w-56 bg-white border-r border-gray-100 p-4 flex flex-col gap-3 shrink-0 overflow-y-auto">
-        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">AI 功能</div>
+        <button onClick={handleAiAnalyze} disabled={aiLoading}
+          className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-sm hover:bg-emerald-100 disabled:opacity-60">
+          {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+          {aiLoading ? '分析中...' : 'AI 分析文獻庫'}
+        </button>
+        <div>
+          <input ref={imageInputRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f) }} />
+          <button onClick={() => imageInputRef.current?.click()} disabled={aiLoading}
+            className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 rounded-lg text-sm hover:bg-amber-100 disabled:opacity-60 w-full">
+            <ImagePlus size={14} /> AI 解析模型圖
+          </button>
+        </div>
+        {aiProgress && <p className="text-xs text-emerald-600 bg-emerald-50 rounded px-2 py-1">{aiProgress}</p>}
+        {aiError && <p className="text-xs text-red-500">{aiError}</p>}
+
+        <div className="border-t pt-3 mt-1">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">手動新增</div>
+        </div>
         <button onClick={() => setShowAddVar(true)}
           className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100">
           <Plus size={14} /> 新增變數
@@ -420,6 +548,26 @@ function BoardInner() {
             </Field>
             <ModalActions onCancel={() => setShowAddVar(false)} />
           </form>
+        </Modal>
+      )}
+
+      {/* Modal: Select paper for image */}
+      {showImageModal && (
+        <Modal title="選擇圖片對應的文獻" onClose={() => { setShowImageModal(false); setPendingImageB64('') }}>
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">解析後的變數與關係將歸屬於此文獻</p>
+            <Field label="所屬文獻 *">
+              <select value={imagePaperId} onChange={(e) => setImagePaperId(e.target.value)} className={INPUT}>
+                <option value="">請選擇</option>
+                {papers.map((p) => <option key={p.id} value={p.id}>{p.title} ({p.year})</option>)}
+              </select>
+            </Field>
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={() => { setShowImageModal(false); setPendingImageB64('') }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
+              <button type="button" onClick={handleParseImage} disabled={!imagePaperId}
+                className="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 disabled:opacity-50">開始解析</button>
+            </div>
+          </div>
         </Modal>
       )}
 

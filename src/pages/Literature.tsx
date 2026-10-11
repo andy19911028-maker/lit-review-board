@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useStore } from '../lib/store'
 import { nanoid } from '../lib/utils'
 import type { Paper } from '../types'
-import { Plus, Trash2, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, X, ChevronDown, ChevronUp, FileUp, Loader2 } from 'lucide-react'
 
 const EMPTY_FORM: Omit<Paper, 'id' | 'created_at'> = {
   title: '',
@@ -21,6 +21,45 @@ export default function Literature() {
   const [kwInput, setKwInput] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [pdfError, setPdfError] = useState('')
+  const pdfInputRef = useRef<HTMLInputElement>(null)
+
+  const handlePdfUpload = async (file: File) => {
+    if (file.size > 15 * 1024 * 1024) { setPdfError('PDF 過大（上限 15MB）'); return }
+    setPdfLoading(true); setPdfError('')
+    try {
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = (e) => resolve((e.target?.result as string).split(',')[1])
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const res = await fetch('/api/extract-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfBase64: b64 }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setForm({
+        title: data.title ?? '',
+        authors: data.authors ?? '',
+        year: data.year ?? new Date().getFullYear(),
+        journal: data.journal ?? '',
+        abstract: data.abstract ?? '',
+        doi: data.doi ?? '',
+        keywords: Array.isArray(data.keywords) ? data.keywords : [],
+      })
+      setShowForm(true)
+    } catch (e) {
+      setPdfError('解析失敗，請稍後重試')
+      console.error(e)
+    } finally {
+      setPdfLoading(false)
+      if (pdfInputRef.current) pdfInputRef.current.value = ''
+    }
+  }
 
   const filtered = papers.filter(
     (p) =>
@@ -54,13 +93,26 @@ export default function Literature() {
           <h2 className="text-2xl font-bold text-gray-800">文獻庫</h2>
           <p className="text-sm text-gray-400 mt-0.5">{papers.length} 篇文獻</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={16} /> 新增文獻
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={pdfInputRef} type="file" accept=".pdf" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePdfUpload(f) }} />
+          <button
+            onClick={() => pdfInputRef.current?.click()}
+            disabled={pdfLoading}
+            className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-60"
+          >
+            {pdfLoading ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+            {pdfLoading ? 'AI 解析中...' : 'PDF 解析'}
+          </button>
+          <button
+            onClick={() => { setForm(EMPTY_FORM); setShowForm(true) }}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={16} /> 手動新增
+          </button>
+        </div>
       </div>
+      {pdfError && <p className="text-sm text-red-500 mb-3">{pdfError}</p>}
 
       <input
         type="text"

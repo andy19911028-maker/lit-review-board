@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../lib/store'
 import { nanoid } from '../lib/utils'
 import type { Hypothesis } from '../types'
-import { Plus, X, CheckCircle2, Circle, BookOpen } from 'lucide-react'
+import { Plus, X, CheckCircle2, Circle, BookOpen, Sparkles, Loader2 } from 'lucide-react'
 
 const EMPTY: Omit<Hypothesis, 'id'> = {
   paper_id: '',
@@ -18,6 +18,35 @@ export default function Hypotheses() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [filterPaper, setFilterPaper] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiProgress, setAiProgress] = useState('')
+  const [aiError, setAiError] = useState('')
+
+  const handleAiGenerate = async () => {
+    if (!papers.length) { setAiError('請先新增文獻'); return }
+    setAiLoading(true); setAiError('')
+    let added = 0
+    for (const paper of papers) {
+      setAiProgress(`分析「${paper.title.slice(0, 20)}...」(${papers.indexOf(paper) + 1}/${papers.length})`)
+      try {
+        const res = await fetch('/api/generate-hypotheses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: paper.title, abstract: paper.abstract ?? '' }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const data = await res.json() as { hypotheses: { number: string; type: string; content: string }[] }
+        for (const h of (data.hypotheses ?? [])) {
+          const dup = hypotheses.find((eh) => eh.paper_id === paper.id && eh.number === h.number)
+          if (dup) continue
+          addHypothesis({ id: nanoid(), paper_id: paper.id, number: h.number, content: h.content, type: h.type as Hypothesis['type'], variable_ids: [] })
+          added++
+        }
+      } catch (e) { console.error(e) }
+    }
+    setAiLoading(false); setAiProgress('')
+    if (added === 0) setAiError('未找到假設/命題（摘要資訊可能不足）')
+  }
 
   const filtered = hypotheses.filter((h) => !filterPaper || h.paper_id === filterPaper)
 
@@ -41,13 +70,25 @@ export default function Hypotheses() {
           <h2 className="text-2xl font-bold text-gray-800">假設 / 命題</h2>
           <p className="text-sm text-gray-400 mt-0.5">{hypotheses.length} 項</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
-        >
-          <Plus size={16} /> 新增假設
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleAiGenerate}
+            disabled={aiLoading}
+            className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {aiLoading ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            {aiLoading ? '生成中...' : 'AI 自動生成'}
+          </button>
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
+          >
+            <Plus size={16} /> 手動新增
+          </button>
+        </div>
       </div>
+      {aiProgress && <p className="text-xs text-emerald-600 bg-emerald-50 rounded px-3 py-1.5 mb-3">{aiProgress}</p>}
+      {aiError && <p className="text-xs text-red-500 mb-3">{aiError}</p>}
 
       <div className="mb-5">
         <select
