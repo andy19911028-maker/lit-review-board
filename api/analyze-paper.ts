@@ -1,32 +1,32 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { completeJson, sendAiError, textModel } from '../lib/ai'
 
 export const config = { api: { bodyParser: { sizeLimit: '20mb' } } }
 export const maxDuration = 60
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+type AnalysisResult = {
+  variables: { name: string; type: string; description: string }[]
+  relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[]
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { title, abstract, pdfBase64 } = req.body as { title: string; abstract?: string; pdfBase64?: string }
+  const { title, abstract } = req.body as { title: string; abstract?: string }
   if (!title) return res.status(400).json({ error: 'Missing title' })
 
-  const content: Anthropic.MessageParam['content'] = []
+  try {
+    const data = await completeJson<AnalysisResult>({
+      model: textModel(),
+      maxTokens: 4096,
+      messages: [{
+        role: 'user',
+        content: `你是研究方法專家。請分析此學術論文，提取所有理論構念（變數）與它們之間的假設關係。
 
-  if (pdfBase64) {
-    content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } } as any)
-  }
+論文標題：${title}
 
-  const paperInfo = pdfBase64
-    ? `以上為論文全文。論文標題：${title}`
-    : `論文標題：${title}\n\n摘要：\n${abstract ?? '（無摘要）'}`
-
-  content.push({
-    type: 'text',
-    text: `你是研究方法專家。請分析此學術論文，提取所有理論構念（變數）與它們之間的假設關係。
-
-${pdfBase64 ? '' : paperInfo}
+摘要：
+${abstract ?? '（無摘要）'}
 
 只回覆 JSON（不要有任何其他文字）：
 {
@@ -55,21 +55,12 @@ ${pdfBase64 ? '' : paperInfo}
 - moderator（調節變數）：影響其他關係強度的
 - control（控制變數）：需要排除的干擾因素
 
-${pdfBase64 ? '' : '注意：只根據摘要分析，盡量提取有把握的關係'}`,
-  })
+注意：只根據摘要分析，盡量提取有把握的關係`,
+      }],
+    })
 
-  const msg = await client.messages.create({
-    model: 'claude-opus-5-5',
-    max_tokens: 4096,
-    thinking: { type: 'adaptive' },
-    messages: [{ role: 'user', content }],
-  })
-
-  const text = msg.content.find((b) => b.type === 'text')?.text ?? ''
-  try {
-    const cleaned = text.replace(/```json\n?|\n?```/g, '').trim()
-    res.json(JSON.parse(cleaned))
-  } catch {
-    res.status(500).json({ error: 'Parse failed', raw: text })
+    res.json(data)
+  } catch (e) {
+    sendAiError(res, e)
   }
 }

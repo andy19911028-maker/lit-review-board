@@ -1,12 +1,13 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { completeJson, sendAiError, visionModel } from '../lib/ai'
 
 export const config = { api: { bodyParser: { sizeLimit: '10mb' } } }
 export const maxDuration = 60
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
-type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+type AnalysisResult = {
+  variables: { name: string; type: string; description: string }[]
+  relationships: { from: string; to: string; direction: string; explanation: string; original_text: string }[]
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
@@ -14,20 +15,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { imageBase64, mediaType = 'image/png' } = req.body as { imageBase64: string; mediaType?: string }
   if (!imageBase64) return res.status(400).json({ error: 'Missing imageBase64' })
 
-  const msg = await client.messages.create({
-    model: 'claude-opus-5-5',
-    max_tokens: 4096,
-    thinking: { type: 'adaptive' },
-    messages: [{
-      role: 'user',
-      content: [
-        {
-          type: 'image',
-          source: { type: 'base64', media_type: mediaType as ImageMediaType, data: imageBase64 },
-        },
-        {
-          type: 'text',
-          text: `這是一張學術論文的理論模型圖（theoretical model / research framework）。
+  try {
+    const data = await completeJson<AnalysisResult>({
+      model: visionModel(),
+      maxTokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: `data:${mediaType};base64,${imageBase64}` },
+          },
+          {
+            type: 'text',
+            text: `這是一張學術論文的理論模型圖（theoretical model / research framework）。
 
 請仔細分析圖中所有元素，回覆 JSON（不要有任何其他文字）：
 {
@@ -56,16 +57,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 在關係線旁影響強度 → moderator（調節變數）
 - 箭頭標籤 + → positive，- → negative，± → mixed，無標籤 → unknown
 - 若有多個方向判斷不確定就填 unknown`,
-        },
-      ],
-    }],
-  })
+          },
+        ],
+      }],
+    })
 
-  const text = msg.content.find((b) => b.type === 'text')?.text ?? ''
-  try {
-    const cleaned = text.replace(/```json\n?|\n?```/g, '').trim()
-    res.json(JSON.parse(cleaned))
-  } catch {
-    res.status(500).json({ error: 'Parse failed', raw: text })
+    res.json(data)
+  } catch (e) {
+    sendAiError(res, e)
   }
 }

@@ -40,7 +40,10 @@ export default function Literature() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pdfBase64: b64 }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null)
+        throw new Error(errBody?.error ?? `解析失敗（${res.status}）`)
+      }
       const data = await res.json()
       setForm({
         title: data.title ?? '',
@@ -53,7 +56,7 @@ export default function Literature() {
       })
       setShowForm(true)
     } catch (e) {
-      setPdfError('解析失敗，請稍後重試')
+      setPdfError(e instanceof Error && e.message ? e.message : '解析失敗，請稍後重試')
       console.error(e)
     } finally {
       setPdfLoading(false)
