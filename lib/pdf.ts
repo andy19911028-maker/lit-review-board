@@ -2,6 +2,9 @@ import './polyfills.js'
 import { PDFParse } from 'pdf-parse'
 import { AiError } from './ai.js'
 
+// Point pdfjs-dist's fake worker to the copy in lib/ (bundled via includeFiles)
+PDFParse.setWorker(new URL('./pdf.worker.mjs', import.meta.url).href)
+
 const MIN_TEXT_CHARS = 200
 
 export async function extractPdfText(pdfBase64: string, firstPages?: number): Promise<string> {

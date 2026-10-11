@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "vercel-build": "tsc -p tsconfig.build-vercel.json && vite build",
+    "vercel-build": "tsc -p tsconfig.build-vercel.json && cp node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs lib/ && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
