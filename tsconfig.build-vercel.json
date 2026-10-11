@@ -8,9 +8,10 @@
     "types": ["node"],
     "noEmit": false,
     "declaration": false,
-    "outDir": ".",
+    "rootDir": "lib",
+    "outDir": "lib",
     "strict": true
   },
-  "include": ["api", "lib"],
+  "include": ["lib"],
   "exclude": ["node_modules", "dist", "src"]
 }
